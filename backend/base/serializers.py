@@ -55,3 +55,7 @@ class PostSerializer(serializers.ModelSerializer):
     def get_formatted_date(self, obj):
         return obj.created_at.strftime("%d %b %y")
         
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MyUser
+        fields = ['username', 'bio', 'email', 'profile_image', 'first_name', 'last_name']

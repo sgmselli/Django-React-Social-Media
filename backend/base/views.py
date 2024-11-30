@@ -2,8 +2,10 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from rest_framework.pagination import PageNumberPagination
+
 from .models import MyUser, Post
-from .serializers import MyUserProfileSerializer, UserRegisterSerializer, PostSerializer
+from .serializers import MyUserProfileSerializer, UserRegisterSerializer, PostSerializer, UserSerializer
 
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
@@ -33,10 +35,24 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
             access_token = tokens['access']
             refresh_token = tokens['refresh']
+            username = request.data['username']
+
+            try:
+                user = MyUser.objects.get(username=username)
+            except MyUser.DoesNotExist:
+                return Response({'error':'user does not exist'})
 
             res = Response()
 
-            res.data = {"success":True}
+            res.data = {"success":True,
+                        "user": {
+                            "username":user.username,
+                            "bio":user.bio,
+                            "email":user.email,
+                            "first_name": user.first_name,
+                            "last_name":user.last_name
+                            }
+                        }
 
             res.set_cookie(
                 key='access_token',
@@ -72,10 +88,12 @@ class CustomTokenRefreshView(TokenRefreshView):
             tokens = response.data
 
             access_token = tokens['access']
-
+            
             res = Response()
 
-            res.data = {"success":True}
+            res.data = {
+                "success":True
+            }
 
             res.set_cookie(
                 key='access_token',
@@ -178,3 +196,110 @@ def toggleLike(request):
             return Response({'now_liked':True})
     except:
         return Response({'error':'failed to like post'})
+    
+
+
+
+    
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_post(request):
+    try:
+        data = request.data
+
+        try:
+            user = MyUser.objects.get(username=request.user.username)
+        except MyUser.DoesNotExist:
+            return Response({'error':'user does not exist'})
+            
+        post = Post.objects.create(
+            user=user,
+            description=data['description']
+        )
+
+        serializer = PostSerializer(post, many=False)
+
+        return Response(serializer.data)
+    
+    except:
+        return Response({"error":"error creating post"})
+    
+
+
+
+
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_posts(request):
+
+    try:
+        my_user = MyUser.objects.get(username=request.user.username)
+    except MyUser.DoesNotExist:
+        return Response({'error':'user does not exist'})
+
+    posts = Post.objects.all().order_by('-created_at')
+
+    paginator = PageNumberPagination()
+    paginator.page_size = 10
+
+    result_page = paginator.paginate_queryset(posts, request)
+    serializer = PostSerializer(result_page, many=True)
+
+    data = []
+
+    for post in serializer.data:
+        new_post = {}
+
+        if my_user.username in post['likes']:
+            new_post = {**post, 'liked':True}
+        else:
+            new_post = {**post, 'liked':False}
+        data.append(new_post)
+
+    return paginator.get_paginated_response(data)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def search_users(request):
+    query = request.query_params.get('query', '')
+    users = MyUser.objects.filter(username__icontains=query)
+    serializer = UserSerializer(users, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def update_user_details(request):
+
+    data = request.data
+
+    try:
+        user = MyUser.objects.get(username=request.user.username)
+    except MyUser.DoesNotExist:
+        return Response({'error':'user does not exist'})
+    
+    serializer = UserSerializer(user, data, partial=True)
+
+    if serializer.is_valid():
+        serializer.save()
+        return Response({**serializer.data, "success":True})
+    
+    return Response({**serializer.errors, "success": False})
+
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def logout(request):
+    
+    try:
+        res = Response()
+        res.data = {"success":True}
+        res.delete_cookie('access_token', path='/', samesite='None')
+        res.delete_cookie('refresh_token', path='/', samesite='None')
+        return res
+
+    except:
+        return Response({"success":False})
